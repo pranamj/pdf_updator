@@ -10,7 +10,7 @@ export const metadata = {
   keywords: 'PDF editor, AI, layout preservation, document editing, Gemini AI',
 }
 
-export default function RootLayout({ children }) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className={inter.className}>
