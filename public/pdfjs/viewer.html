@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html dir="ltr" mozdisallowselectionprint>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>PDF.js viewer</title>
+  <link rel="stylesheet" href="pdf_viewer.css">
+  <script src="/pdfjs/pdf.mjs" type="module"></script>
+  <script src="/pdfjs/pdf_viewer.mjs" type="module"></script>
+</head>
+<body tabindex="1">
+  <div id="outerContainer">
+    <div id="sidebarContainer">
+      <!-- Sidebar content -->
+    </div>
+    <div id="mainContainer">
+      <div class="toolbar">
+        <!-- Toolbar buttons -->
+      </div>
+      <div id="viewerContainer" tabindex="0">
+        <div id="viewer" class="pdfViewer"></div>
+      </div>
+      <div id="errorWrapper" hidden='true'>
+        <!-- Error reporting -->
+      </div>
+    </div>
+  </div>
+  <div id="printContainer"></div>
+</body>
+</html>
