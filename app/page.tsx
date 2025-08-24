@@ -1,156 +1,356 @@
-"use client";
+// app/page.js
+'use client';
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from 'react';
+import PDFViewer from './components/PDFViewer';
+import TextEditor from './components/TextEditor';
+import EditingStatus from './components/EditingStatus';
+import FileUpload from './components/FileUpload';
+import ApiKeyInput from './components/ApiKeyInput';
 
-export default function Home() {
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [originalUrl, setOriginalUrl] = useState<string | null>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const [prompt, setPrompt] = useState("");
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+// Define interfaces for our data structures
+interface BBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
-  // Load a file into the full PDF.js viewer
-  const loadIntoViewer = (url: string) => {
-    setPdfUrl(url);
+interface TextElement {
+  id: string;
+  content: string;
+  bbox: BBox;
+  fontSize: number;
+  fontFamily: string;
+  pageIndex: number;
+  type: string;
+}
+
+interface PDFPage {
+  pageIndex: number;
+  width: number;
+  height: number;
+  textElements: TextElement[];
+}
+
+interface PDFData {
+  pages: PDFPage[];
+  textElements: TextElement[];
+  metadata: {
+    pageCount: number;
+    extractedAt: string;
+    fileSize: number;
+    fileName?: string;
+  };
+}
+
+interface EditResult {
+  editedElements: any[];
+  summary: string;
+  metadata: any;
+  preservedElements: any[];
+  error?: string;
+}
+
+export default function PDFEditor() {
+  const [pdfData, setPdfData] = useState<PDFData | null>(null);
+  const [editedElements, setEditedElements] = useState<any[]>([]);
+  const [apiKey, setApiKey] = useState('');
+  const [editStatus, setEditStatus] = useState('idle'); // idle, loading, success, error
+  const [editResult, setEditResult] = useState<EditResult | null>(null);
+  const [selectedElement, setSelectedElement] = useState<TextElement | null>(null);
+  const [uploadStatus, setUploadStatus] = useState('idle');
+
+  const handlePDFUpload = async (file: File) => {
+    setUploadStatus('loading');
+    setEditStatus('idle');
+    setPdfData(null);
+    setEditedElements([]);
+    setSelectedElement(null);
+    
+    const formData = new FormData();
+    formData.append('pdf', file);
+
+    try {
+      const response = await fetch('/api/extract-pdf', {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Upload failed with status ${response.status}`);
+      }
+      
+      const data = await response.json();
+      setPdfData(data);
+      setEditResult(null);
+      setUploadStatus('success');
+      
+      // Auto-clear upload success status after 3 seconds
+      setTimeout(() => setUploadStatus('idle'), 3000);
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      setUploadStatus('error');
+      setEditResult({ 
+        error: error.message,
+        editedElements: [],
+        summary: '',
+        metadata: {},
+        preservedElements: []
+      });
+      setTimeout(() => setUploadStatus('idle'), 5000);
+    }
   };
 
-  const onUpload = (f: File) => {
-    setFile(f);
-    const url = URL.createObjectURL(f);
-    setOriginalUrl(url);
-    loadIntoViewer(url);
+  const handleEdit = async (instruction: string) => {
+    if (!pdfData || !apiKey) return;
+    
+    setEditStatus('loading');
+    setEditResult(null);
+    
+    try {
+      const response = await fetch('/api/edit-content', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          textElements: pdfData.textElements,
+          editInstruction: instruction,
+          apiKey: apiKey
+        })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Edit failed with status ${response.status}`);
+      }
+      
+      const result = await response.json();
+      setEditedElements(result.editedElements);
+      setEditResult(result);
+      setEditStatus('success');
+    } catch (error) {
+      console.error('Edit error:', error);
+      setEditStatus('error');
+      setEditResult({ 
+        error: error.message,
+        editedElements: [],
+        summary: '',
+        metadata: {},
+        preservedElements: []
+      });
+    }
   };
 
-  const applyEdit = async () => {
-    if (!file || !prompt) {
-      alert("Upload a PDF and enter a prompt first.");
+  const handleDownload = async () => {
+    if (!pdfData || !editedElements.length) {
+      alert('No edited content to download');
       return;
     }
-    const form = new FormData();
-    form.append("file", file);
-    form.append("prompt", prompt);
 
-    const res = await fetch("/api/edit-pdf", { method: "POST", body: form });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      alert("Edit failed: " + (err?.error || res.statusText));
-      return;
+    try {
+      const response = await fetch('/api/generate-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          originalData: pdfData,
+          editedElements: editedElements
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to generate PDF');
+      }
+
+      // Download the PDF
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `edited-${pdfData.metadata.fileName || 'document.pdf'}`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Download error:', error);
+      setEditStatus('error');
+      setEditResult({ 
+        error: 'Failed to download PDF: ' + error.message,
+        editedElements: [],
+        summary: '',
+        metadata: {},
+        preservedElements: []
+      });
     }
-
-    const blob = await res.blob();
-    const editedUrl = URL.createObjectURL(blob);
-    loadIntoViewer(editedUrl);
   };
 
-  const downloadCurrent = () => {
-    if (!pdfUrl) return;
-    const a = document.createElement("a");
-    a.href = pdfUrl;
-    a.download = "edited.pdf";
-    a.click();
+  const handleReset = () => {
+    setEditStatus('idle');
+    setEditResult(null);
+    setUploadStatus('idle');
   };
 
-  const resetToOriginal = () => {
-    if (originalUrl) loadIntoViewer(originalUrl);
+  const handleElementSelect = (element: TextElement | null) => {
+    setSelectedElement(element);
   };
 
-  // Build viewer src when pdfUrl changes
-  const viewerSrc = pdfUrl
-    ? `/pdfjs/viewer.html?file=${encodeURIComponent(pdfUrl)}`
-    : `/pdfjs/viewer.html`;
-
-  // Handle iframe load and error events
-  useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe) return;
-
-    const handleLoad = () => {
-      console.log('PDF viewer loaded successfully');
-    };
-
-    const handleError = (error: Error) => {
-      console.error('Error loading PDF viewer:', error);
-    };
-
-    iframe.addEventListener('load', handleLoad);
-    iframe.addEventListener('error', handleError as any);
-
-    return () => {
-      iframe.removeEventListener('load', handleLoad);
-      iframe.removeEventListener('error', handleError as any);
-    };
-  }, [viewerSrc]);
+  const isReadyToEdit = pdfData && apiKey && editStatus !== 'loading';
 
   return (
-    <div className="min-h-screen w-full flex flex-col">
-      <div className="p-4 border-b flex items-center gap-3">
-        <input
-          type="file"
-          accept="application/pdf"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) onUpload(f);
-          }}
-        />
-        <button
-          className="px-3 py-2 rounded bg-gray-200"
-          onClick={resetToOriginal}
-          disabled={!originalUrl}
-          title="Show original upload"
-        >
-          Reset to Original
-        </button>
-        <div className="ml-auto text-sm text-gray-600">
-          Full PDF.js Viewer below
-        </div>
-      </div>
-
-      <div className="flex-1">
-        <div className="w-full h-[70vh] border-b relative">
-          <iframe
-            key={viewerSrc} // Force re-render when src changes
-            ref={iframeRef}
-            src={viewerSrc}
-            className="w-full h-full"
-            title="PDF Viewer"
-            sandbox="allow-same-origin allow-scripts"
-          />
-          {!pdfUrl && (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
-              <p className="text-gray-500">Upload a PDF to view it here</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="p-4 flex flex-col gap-3">
-        <label className="font-medium">Prompt</label>
-        <textarea
-          className="border rounded p-2 w-full h-28"
-          placeholder={`Examples:\n- Replace all "2023" with "2025"\n- Change company name from "ABC Corp" to "XYZ Ltd"`}
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-        />
-        <div className="flex gap-3">
-          <button
-            className="px-4 py-2 bg-blue-600 text-white rounded"
-            onClick={applyEdit}
-          >
-            Apply Edit & Preview
-          </button>
-          <button
-            className="px-4 py-2 bg-green-600 text-white rounded"
-            onClick={downloadCurrent}
-            disabled={!pdfUrl}
-          >
-            Save (Download)
-          </button>
-        </div>
-        <p className="text-xs text-gray-500">
-          Edits are applied server-side to a copy; your original file remains
-          unchanged. The preview refreshes automatically.
+    <div className="container mx-auto px-4 py-8 max-w-7xl">
+      {/* Header */}
+      <div className="text-center mb-8">
+        <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-3">
+          AI PDF Editor
+        </h1>
+        <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+          Edit PDF content with AI while preserving original layout and formatting. 
+          Perfect for invoices, contracts, and business documents.
         </p>
       </div>
+
+      {/* Configuration Section */}
+      <div className="grid md:grid-cols-2 gap-6 mb-8">
+        <ApiKeyInput apiKey={apiKey} setApiKey={setApiKey} />
+        <FileUpload onFileUpload={handlePDFUpload} isLoading={uploadStatus === 'loading'} />
+      </div>
+
+      {/* Main Content */}
+      {pdfData && (
+        <>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
+            {/* PDF Viewer */}
+            <div>
+              <PDFViewer 
+                pdfData={pdfData} 
+                editedElements={editedElements}
+                onElementSelect={handleElementSelect}
+              />
+            </div>
+            
+            {/* Text Editor */}
+            <div>
+              <TextEditor 
+                onEdit={handleEdit} 
+                disabled={!isReadyToEdit}
+                editStatus={editStatus}
+                selectedElement={selectedElement}
+              />
+            </div>
+          </div>
+
+          {/* Document Statistics */}
+          {editedElements.length > 0 && (
+            <div className="bg-white rounded-lg shadow-sm p-6 mb-8">
+              <h3 className="text-lg font-semibold text-gray-800 mb-4">📊 Edit Summary</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="text-center p-3 bg-blue-50 rounded-lg">
+                  <div className="text-2xl font-bold text-blue-600">{pdfData.textElements.length}</div>
+                  <div className="text-sm text-blue-800">Total Elements</div>
+                </div>
+                <div className="text-center p-3 bg-green-50 rounded-lg">
+                  <div className="text-2xl font-bold text-green-600">
+                    {editResult?.metadata?.editedElements || editedElements.length}
+                  </div>
+                  <div className="text-sm text-green-800">Elements Edited</div>
+                </div>
+                <div className="text-center p-3 bg-orange-50 rounded-lg">
+                  <div className="text-2xl font-bold text-orange-600">
+                    {editResult?.metadata?.truncatedElements || 0}
+                  </div>
+                  <div className="text-sm text-orange-800">Truncated</div>
+                </div>
+                <div className="text-center p-3 bg-purple-50 rounded-lg">
+                  <div className="text-2xl font-bold text-purple-600">
+                    {editResult?.preservedElements?.length || 0}
+                  </div>
+                  <div className="text-sm text-purple-800">Preserved</div>
+                </div>
+              </div>
+              
+              {editResult?.summary && (
+                <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                  <p className="text-sm text-gray-700">
+                    <strong>Summary:</strong> {editResult.summary}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Features Section */}
+      <div className="bg-white rounded-lg shadow-sm p-8">
+        <h2 className="text-3xl font-bold text-center text-gray-900 mb-8">
+          🚀 Features & Capabilities
+        </h2>
+        
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[
+            {
+              icon: '🎯',
+              title: 'Layout Preservation',
+              description: 'Maintains exact positioning, sizing, and formatting of all elements'
+            },
+            {
+              icon: '✂️',
+              title: 'Smart Truncation',
+              description: 'Automatically truncates text that exceeds available space constraints'
+            },
+            {
+              icon: '🚫',
+              title: 'Overlap Prevention',
+              description: 'Prevents text elements from overlapping and breaking document design'
+            },
+            {
+              icon: '🤖',
+              title: 'AI-Powered Editing',
+              description: 'Uses Google Gemini AI to intelligently edit content based on instructions'
+            },
+            {
+              icon: '📱',
+              title: 'Interactive Interface',
+              description: 'Click elements to select, zoom controls, real-time preview of changes'
+            },
+            {
+              icon: '⬇️',
+              title: 'PDF Generation',
+              description: 'Download edited PDFs with preserved formatting and professional quality'
+            }
+          ].map((feature, index) => (
+            <div key={index} className="text-center p-6 rounded-lg bg-gradient-to-br from-gray-50 to-white border border-gray-200">
+              <div className="text-4xl mb-4">{feature.icon}</div>
+              <h3 className="font-semibold text-gray-800 mb-2">{feature.title}</h3>
+              <p className="text-sm text-gray-600 leading-relaxed">{feature.description}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-8 p-6 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-200">
+          <h3 className="font-semibold text-gray-800 mb-3">🛡️ Layout Protection System</h3>
+          <div className="grid md:grid-cols-2 gap-4 text-sm text-gray-700">
+            <div>
+              <p className="mb-2"><strong>Character Limits:</strong> Calculates maximum text based on element size and font</p>
+              <p className="mb-2"><strong>Boundary Enforcement:</strong> Ensures text never exceeds original element bounds</p>
+            </div>
+            <div>
+              <p className="mb-2"><strong>Multi-line Support:</strong> Handles both single and multi-line text elements</p>
+              <p className="mb-2"><strong>Visual Indicators:</strong> Shows edited, truncated, and selected elements</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Status Toast */}
+      <EditingStatus
+        status={editStatus || uploadStatus}
+        result={editResult}
+        onDownload={handleDownload}
+        onReset={handleReset}
+      />
     </div>
   );
 }

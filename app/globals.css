@@ -1,26 +1,53 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-/* :root {
-  --background: #ffffff;
-  --foreground: #171717;
+:root {
+  --background: 0 0% 100%;
+  --foreground: 222.2 84% 4.9%;
+  --border: 214.3 31.8% 91.4%;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+.dark {
+  --background: 222.2 84% 4.9%;
+  --foreground: 210 40% 98%;
+  --border: 217.2 32.6% 17.5%;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  @apply border-border;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
-} */
+  @apply bg-background text-foreground;
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
+
+.loading-spinner {
+  @apply border-4 border-gray-200 border-t-blue-500 rounded-full w-8 h-8 animate-spin;
+}
+
+.text-element {
+  @apply absolute border border-dashed border-gray-300 bg-white/80 cursor-pointer transition-all duration-200;
+}
+
+.text-element:hover {
+  @apply bg-blue-50 border-blue-400;
+}
+
+.text-element.edited {
+  @apply bg-green-50 border-green-400;
+}
+
+.text-element.truncated {
+  @apply bg-red-50 border-red-400;
+}
+
+.upload-area {
+  @apply border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-gray-400 transition-colors;
+}
+
+.upload-area.dragover {
+  @apply border-blue-400 bg-blue-50;
+}
+
